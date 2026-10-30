@@ -36,9 +36,9 @@ export async function start(){
  const origin=process.env.BETTER_AUTH_URL||process.env.RENDER_EXTERNAL_URL;const secret=process.env.BETTER_AUTH_SECRET;const connectionString=process.env.SUPPLY_DATABASE_URL;
  if(!origin||!secret||secret.length<32||!connectionString)throw new Error('Supply requires its own URL, authentication secret and PostgreSQL connection.');
  const pool=new pg.Pool({connectionString,options:'-c search_path=supply_app',max:5,connectionTimeoutMillis:10000,idleTimeoutMillis:30000});
- await migrate(pool);const migrationAuth=createAuth(pool,{origin,secret,validateSchema:false});const authMigrations=await getMigrations(migrationAuth.options);await authMigrations.runMigrations();const auth=createAuth(pool,{origin,secret});
+ await migrate(pool).catch(error=>{error.supplyStage='database-migration';throw error;});const migrationAuth=createAuth(pool,{origin,secret,validateSchema:false});const authMigrations=await getMigrations(migrationAuth.options);await authMigrations.runMigrations().catch(error=>{error.supplyStage='auth-migration';throw error;});const auth=createAuth(pool,{origin,secret});
  const app=buildServer({pool,auth,origin,environment:process.env.SUPPLY_ENVIRONMENT||'production',adminUserId:process.env.SUPPLY_ADMIN_USER_ID||''});
  const server=app.listen(Number(process.env.PORT||3100),'0.0.0.0',()=>console.log('Revoltz Supply is accepting requests.'));server.requestTimeout=15000;server.headersTimeout=10000;
  process.on('SIGTERM',()=>{server.close(async()=>{await pool.end();process.exit(0);});setTimeout(()=>process.exit(1),25000).unref();});return {server,pool};
 }
-if(process.argv[1]===fileURLToPath(import.meta.url))start().catch(()=>{console.error('Supply startup failed. Check the isolated database, authentication settings and migration compatibility.');process.exitCode=1;});
+if(process.argv[1]===fileURLToPath(import.meta.url))start().catch(error=>{const code=typeof error.code==='string'&&/^[A-Z0-9_]{2,60}$/.test(error.code)?error.code:'UNCLASSIFIED';console.error('Supply startup failed.',error.supplyStage||'configuration',code);process.exitCode=1;});
